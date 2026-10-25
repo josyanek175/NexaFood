@@ -34,3 +34,10 @@ dist-ssr
 # Environment variables
 .env
 .env.*
+!.env.example
+!**/.env.example
+
+# API build / coverage
+apps/api/dist
+packages/shared/dist
+coverage

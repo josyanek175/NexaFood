@@ -1,0 +1,41 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1740000000000,
+      "tag": "0000_nexafood_foundation",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1740000001000,
+      "tag": "0001_auth_sessions",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1740000002000,
+      "tag": "0002_tenant_same_tenant_fks",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1740000003000,
+      "tag": "0003_products_active_available",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1740000004000,
+      "tag": "0004_order_item_kitchen_status",
+      "breakpoints": true
+    }
+  ]
+}
