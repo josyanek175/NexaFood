@@ -41,3 +41,6 @@ dist-ssr
 apps/api/dist
 packages/shared/dist
 coverage
+
+# Local review caches
+.review-runtime/

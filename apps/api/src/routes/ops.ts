@@ -197,7 +197,8 @@ const opsRoutes: FastifyPluginAsync<OpsRoutesOpts> = async (app, opts) => {
       unsubscribe();
     };
 
-    request.raw.on("close", cleanup);
+    reply.raw.on("close", cleanup);
+    request.raw.on("aborted", cleanup);
     request.raw.on("error", cleanup);
   });
 };

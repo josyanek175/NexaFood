@@ -46,19 +46,19 @@ function Dashboard() {
   const preparing = orders?.filter((o) => o.status === "preparando").length ?? 0;
   const canceled = orders?.filter((o) => o.status === "cancelado").length ?? 0;
   const revenue = orders?.filter((o) => o.status !== "cancelado").reduce((s, o) => s + o.total, 0) ?? 0;
-  const count = orders?.length ?? 0;
+  const count = orders?.filter(o => o.status !== "cancelado").length ?? 0;
 
 
   return (
     <>
-      <PageHeader title="Visão geral" description="Desempenho de hoje comparado ao mesmo dia da semana anterior." />
+      <PageHeader title="Visão geral" description="Resumo dos últimos pedidos carregados (até 200)." />
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
-        <StatCard label="Vendas de hoje" value={brl(revenue)} trend={12.4} hint="vs. semana passada" icon={<DollarSign className="size-4" />} />
-        <StatCard label="Pedidos" value={String(count)} trend={8.1} hint="hoje" icon={<ShoppingBag className="size-4" />} />
-        <StatCard label="Ticket médio" value={brl(count ? revenue / count : 0)} trend={-2.3} hint="vs. semana passada" icon={<TrendingUp className="size-4" />} />
+        <StatCard label="Valor dos pedidos" value={brl(revenue)} hint="Pedidos carregados" icon={<DollarSign className="size-4" />} />
+        <StatCard label="Pedidos" value={String(count)} hint="Pedidos carregados" icon={<ShoppingBag className="size-4" />} />
+        <StatCard label="Ticket médio" value={brl(count ? revenue / count : 0)} hint="Pedidos carregados" icon={<TrendingUp className="size-4" />} />
         <StatCard label="Em preparação" value={String(preparing)} hint="na cozinha agora" icon={<CookingPot className="size-4" />} />
-        <StatCard label="Cancelados" value={String(canceled)} hint="hoje" icon={<XCircle className="size-4" />} />
+        <StatCard label="Cancelados" value={String(canceled)} hint="Pedidos carregados" icon={<XCircle className="size-4" />} />
       </div>
 
       <div className="mt-4 grid gap-4 lg:grid-cols-3">

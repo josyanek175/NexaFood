@@ -1,3 +1,4 @@
+import rateLimit from "@fastify/rate-limit";
 import type { FastifyPluginAsync } from "fastify";
 import { z } from "zod";
 import { badRequest, notFound } from "../lib/errors.js";
@@ -26,15 +27,16 @@ const placeOrderBodySchema = z.object({
         variationId: z.string().uuid().optional().nullable(),
         quantity: z.number().int().min(1).max(99),
         notes: z.string().max(300).optional().nullable(),
-        removed: z.array(z.string()).optional(),
-        optionItemIds: z.array(z.string().uuid()).optional(),
+        removed: z.array(z.string().max(100)).max(50).optional(),
+        optionItemIds: z.array(z.string().uuid()).max(50).optional(),
       }),
     )
-    .min(1),
+    .min(1).max(100),
 });
 
 const publicOrdersRoutes: FastifyPluginAsync<PublicOrdersRoutesOpts> = async (app, opts) => {
-  app.post("/api/v1/public/orders", async (request) => {
+  await app.register(rateLimit, { max: 120, timeWindow: 60_000 });
+  app.post("/api/v1/public/orders", { config: { rateLimit: { max: 20, timeWindow: 60_000 } } }, async (request) => {
     const parsed = placeOrderBodySchema.safeParse(request.body);
     if (!parsed.success) throw badRequest("Payload inválido.", parsed.error.flatten());
     return opts.orderService.placeOrder(parsed.data);
@@ -50,25 +52,10 @@ const publicOrdersRoutes: FastifyPluginAsync<PublicOrdersRoutesOpts> = async (ap
     },
   );
 
-  /**
-   * Deprecated: requires slug query to avoid cross-tenant code collision.
-   * Prefer GET /api/v1/public/orders/tracking/:token
-   */
-  app.get<{ Params: { code: string }; Querystring: { slug?: string } }>(
-    "/api/v1/public/orders/:code/tracking",
-    async (request) => {
-      const slug = request.query.slug?.trim();
-      if (!slug) {
-        throw badRequest("Parâmetro slug é obrigatório nesta rota (deprecated). Use /tracking/:token.");
-      }
-      const tracking = await opts.orderService.getOrderTrackingBySlugAndCode(
-        slug,
-        request.params.code,
-      );
-      if (!tracking) throw notFound("Pedido não encontrado");
-      return tracking;
-    },
-  );
+  // Slug + short numeric code is enumerable; the current web uses opaque tokens.
+  app.get("/api/v1/public/orders/:code/tracking", async (_request, reply) => {
+    return reply.status(410).send({ error: { code: "TRACKING_TOKEN_REQUIRED", message: "Use o link privado de acompanhamento recebido ao criar o pedido." } });
+  });
 };
 
 export default publicOrdersRoutes;

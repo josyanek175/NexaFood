@@ -304,7 +304,7 @@ export function ManualOrderDialog({ open, onOpenChange, onCreated }: Props) {
               {service === "mesa" && (
                 <div className="space-y-1.5 sm:col-span-2">
                   <Label>Mesa</Label>
-                  <Select value={tableId || undefined} onValueChange={setTableId}>
+                  <Select value={tableId} onValueChange={setTableId}>
                     <SelectTrigger className="h-10 rounded-xl">
                       <SelectValue placeholder="Selecione a mesa" />
                     </SelectTrigger>

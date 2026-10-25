@@ -46,7 +46,6 @@ export function CartSheet({
   const [payment, setPayment] = useState<PaymentMethod>("pix");
   const [changeFor, setChangeFor] = useState("");
   const [coupon, setCoupon] = useState("");
-  const [appliedCoupon, setAppliedCoupon] = useState<{ code: string; discount: number } | null>(null);
   const [form, setForm] = useState<Record<string, string>>({ table: tableNumber ? String(tableNumber) : "" });
 
   const set = (k: string, v: string) => setForm((p) => ({ ...p, [k]: v }));
@@ -54,20 +53,11 @@ export function CartSheet({
   const subtotal = cart.subtotal;
   const deliveryFee = mode === "delivery" ? establishment.delivery_fee_from : 0;
   const serviceFee = mode === "local" ? (subtotal * establishment.service_fee_percent) / 100 : 0;
-  const discount = appliedCoupon?.discount ?? 0;
+  const discount = 0; // Coupons require server validation before they can change prices.
   const total = Math.max(0, subtotal - discount + deliveryFee + serviceFee);
 
   const applyCoupon = () => {
-    const code = coupon.trim().toUpperCase();
-    if (code === "NEXA10" && subtotal >= 40) {
-      setAppliedCoupon({ code, discount: subtotal * 0.1 });
-      toast.success("Cupom NEXA10 aplicado (10% de desconto)");
-    } else if (code === "FRETEGRATIS" && subtotal >= 90) {
-      setAppliedCoupon({ code, discount: establishment.delivery_fee_from });
-      toast.success("Cupom FRETEGRATIS aplicado");
-    } else {
-      toast.error("Cupom inválido ou pedido abaixo do mínimo");
-    }
+    toast.info("Cupons ainda não estão disponíveis para este estabelecimento.");
   };
 
   const [submitting, setSubmitting] = useState(false);
@@ -93,7 +83,7 @@ export function CartSheet({
           ? { tableNumber: Number(form["table"] ?? tableNumber) }
           : {}),
         ...(form["notes"] ? { notes: form["notes"] } : {}),
-        ...(payment === "dinheiro" && changeFor ? { changeFor: Number(changeFor) } : {}),
+        ...(payment === "dinheiro" && changeFor ? { changeFor: Number(changeFor.trim().replace(",", ".")) } : {}),
         lines: cart.lines,
       });
       cart.clear();
@@ -225,10 +215,11 @@ export function CartSheet({
                       <Input
                         value={coupon}
                         onChange={(e) => setCoupon(e.target.value)}
-                        placeholder="NEXA10"
+                        placeholder="Cupons indisponíveis"
+                        disabled
                         className="rounded-xl uppercase"
                       />
-                      <Button variant="secondary" className="rounded-xl" onClick={applyCoupon}>
+                      <Button disabled variant="secondary" className="rounded-xl" onClick={applyCoupon}>
                         <Ticket className="mr-1 size-4" /> Aplicar
                       </Button>
                     </div>
@@ -446,8 +437,9 @@ function Field({
 }) {
   return (
     <div className="space-y-1.5">
-      <Label className="text-xs font-bold uppercase">{label}</Label>
+      <Label htmlFor={`checkout-${k}`} className="text-xs font-bold uppercase">{label}</Label>
       <Input
+        id={`checkout-${k}`}
         value={form[k] ?? ""}
         onChange={(e) => set(k, e.target.value)}
         placeholder={placeholder ?? ""}

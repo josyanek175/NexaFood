@@ -1,3 +1,4 @@
+import { ModulePending } from "@/components/admin/ModulePending";
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { Bike, MapPin, Timer } from "lucide-react";
@@ -9,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/admin/entregas")({
-  component: DeliveriesPage,
+  component: () => <ModulePending title="Entregas" />,
 });
 
 const DRIVER_STATUS: Record<string, string> = {
@@ -18,7 +19,7 @@ const DRIVER_STATUS: Record<string, string> = {
   offline: "bg-muted text-muted-foreground",
 };
 
-function DeliveriesPage() {
+export function DeliveriesPage() {
   const est = establishments[0]!;
   const { data: orders } = useQuery({ queryKey: ["orders", est.id], queryFn: () => api.listOrders(est.id) });
   const { data: drivers } = useQuery({ queryKey: ["drivers", est.id], queryFn: () => api.listDrivers(est.id) });

@@ -1,3 +1,4 @@
+import { ModulePending } from "@/components/admin/ModulePending";
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { AlertTriangle, CheckCircle2, RefreshCw, Settings2 } from "lucide-react";
@@ -10,7 +11,7 @@ import type { IntegrationStatus } from "@/lib/types";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/admin/integracoes")({
-  component: IntegrationsPage,
+  component: () => <ModulePending title="Integrações" />,
 });
 
 const STATUS: Record<IntegrationStatus, { label: string; className: string }> = {
@@ -20,7 +21,7 @@ const STATUS: Record<IntegrationStatus, { label: string; className: string }> = 
   nao_configurado: { label: "Não configurado", className: "bg-muted text-muted-foreground" },
 };
 
-function IntegrationsPage() {
+export function IntegrationsPage() {
   const est = establishments[0]!;
   const { data } = useQuery({ queryKey: ["integrations", est.id], queryFn: () => api.listIntegrations(est.id) });
 

@@ -1,3 +1,4 @@
+import { ModulePending } from "@/components/admin/ModulePending";
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { Plus, Ticket } from "lucide-react";
@@ -10,10 +11,10 @@ import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/admin/cupons")({
-  component: CouponsPage,
+  component: () => <ModulePending title="Cupons" />,
 });
 
-function CouponsPage() {
+export function CouponsPage() {
   const est = establishments[0]!;
   const { data } = useQuery({ queryKey: ["coupons", est.id], queryFn: () => api.listCoupons(est.id) });
 

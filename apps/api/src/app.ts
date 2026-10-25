@@ -1,3 +1,4 @@
+import { forbidden } from "./lib/errors.js";
 import { randomUUID } from "node:crypto";
 import Fastify from "fastify";
 import cookie from "@fastify/cookie";
@@ -80,9 +81,21 @@ export async function buildApp(options: BuildAppOptions) {
 
   await app.register(requestIdPlugin);
   await app.register(errorHandlerPlugin);
+  app.addHook("onRequest", async (request, reply) => {
+    if (request.url.startsWith("/api/v1/")) reply.header("cache-control", "no-store");
+    const sensitive = !["GET", "HEAD", "OPTIONS"].includes(request.method) || request.url.split("?")[0] === "/api/v1/events";
+    if (!sensitive) return;
+    const origin = request.headers.origin;
+    const allowed = resolveCorsOrigins(env);
+    if ((origin !== undefined && !(Array.isArray(allowed) && allowed.includes(origin))) ||
+      (origin === undefined && request.headers["sec-fetch-site"] === "cross-site")) {
+      throw forbidden("Origem não autorizada.");
+    }
+  });
   await app.register(cookie);
   await app.register(cors, {
     origin: resolveCorsOrigins(env),
+    methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     credentials: true,
   });
 

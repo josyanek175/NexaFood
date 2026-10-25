@@ -568,14 +568,14 @@ describe("tenant security (pglite)", () => {
       method: "GET",
       url: `/api/v1/public/orders/${code}/tracking`,
     });
-    expect(deprecatedBare.statusCode).toBe(400);
+    expect(deprecatedBare.statusCode).toBe(410);
 
     const deprecatedSlug = await app.inject({
       method: "GET",
       url: `/api/v1/public/orders/${code}/tracking?slug=est-b`,
     });
-    expect(deprecatedSlug.statusCode).toBe(200);
-    expect(deprecatedSlug.json().customer_first_name).toBe("B");
+    expect(deprecatedSlug.statusCode).toBe(410);
+    expect(deprecatedSlug.json().customer_first_name).toBeUndefined();
 
     void eq;
   });

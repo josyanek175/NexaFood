@@ -6,7 +6,7 @@ const apiGet = vi.fn();
 vi.mock("@/lib/api-client", async () => {
   class ApiClientError extends Error {
     status: number;
-    code?: string;
+    code: string | undefined;
     constructor(message: string, status: number, code?: string) {
       super(message);
       this.name = "ApiClientError";
@@ -68,6 +68,7 @@ function apiPayload(slug: string): PublicMenuResponse {
         promoPrice: null,
         prepMinutes: 10,
         featured: false,
+        available: true,
         removableIngredients: [],
         channels: ["cardapio"],
         position: 0,

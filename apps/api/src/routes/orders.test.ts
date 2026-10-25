@@ -9,6 +9,11 @@ import {
   kitchenSectors,
   organizations,
   orderStatusEvents,
+  orders,
+  orderItems,
+  optionGroups,
+  optionItems,
+  productOptionGroups,
   products,
 } from "../db/schema/index.js";
 import { AuthService } from "../services/auth-service.js";
@@ -218,4 +223,101 @@ describe("orders API (pglite)", () => {
     expect(found?.channel).toBe("BALCAO");
     expect(found?.customerName).toBe("Cliente Balcão");
   });
+  it("pedido inválido desfaz pedido, itens e histórico inteiros", async () => {
+    const before = (await db.select().from(orders)).length;
+    const eventsBefore = (await db.select().from(orderStatusEvents)).length;
+    const itemsBefore = (await db.select().from(orderItems)).length;
+    const r = await app.inject({ method: "POST", url: "/api/v1/public/orders", payload: {
+      slug: "est-a", mode: "RETIRADA", paymentMethod: "PIX", customerName: "Rollback",
+      items: [{ productId, quantity: 1 }, { productId: "99999999-9999-4999-8999-999999999999", quantity: 1 }],
+    }});
+    expect(r.statusCode).toBeGreaterThanOrEqual(400);
+    expect((await db.select().from(orders)).length).toBe(before);
+    expect((await db.select().from(orderItems)).length).toBe(itemsBefore);
+    expect((await db.select().from(orderStatusEvents)).length).toBe(eventsBefore);
+  });
+
+  it("não reabre pedido finalizado nem altera seus itens na cozinha", async () => {
+    const created = await app.inject({ method: "POST", url: "/api/v1/public/orders", payload: {
+      slug: "est-a", mode: "RETIRADA", paymentMethod: "PIX", customerName: "Terminal",
+      items: [{ productId, quantity: 1 }],
+    }});
+    expect(created.statusCode).toBe(200);
+    const id = created.json().orderId;
+    const headers = { cookie: adminCookie };
+    expect((await app.inject({ method: "PATCH", url: `/api/v1/orders/${id}/status`, headers, payload: { status: "FINALIZADO" } })).statusCode).toBe(200);
+    const reopen = await app.inject({ method: "PATCH", url: `/api/v1/orders/${id}/status`, headers, payload: { status: "PREPARANDO" } });
+    expect(reopen.statusCode).toBe(400);
+    const [item] = await db.select().from(orderItems).where(eq(orderItems.orderId, id));
+    const kitchen = await app.inject({ method: "PATCH", url: `/api/v1/order-items/${item!.id}/kitchen-status`, headers, payload: { status: "PREPARANDO" } });
+    expect(kitchen.statusCode).toBe(400);
+  });
+
+  it("bloqueia pedidos públicos quando fechado, preservando operação interna", async () => {
+    await db.update(establishments).set({ isOpen: false }).where(eq(establishments.id, EST_A));
+    try {
+      const payload = { slug: "est-a", mode: "RETIRADA", paymentMethod: "PIX", customerName: "Fechado", items: [{ productId, quantity: 1 }] };
+      const publicOrder = await app.inject({ method: "POST", url: "/api/v1/public/orders", payload });
+      expect(publicOrder.statusCode).toBe(400);
+      const internal = await app.inject({ method: "POST", url: "/api/v1/orders", headers: { cookie: adminCookie }, payload });
+      expect(internal.statusCode).toBe(200);
+    } finally {
+      await db.update(establishments).set({ isOpen: true }).where(eq(establishments.id, EST_A));
+    }
+  });
+
+  it("nega escrita e SSE autenticado para origem não autorizada", async () => {
+    const headers = { cookie: adminCookie, origin: "https://untrusted.example.test" };
+    const mutation = await app.inject({ method: "POST", url: "/api/v1/auth/logout", headers });
+    expect(mutation.statusCode).toBe(403);
+    const stream = await app.inject({ url: "/api/v1/events", headers });
+    expect(stream.statusCode).toBe(403);
+    expect(stream.headers["access-control-allow-origin"]).not.toBe("https://untrusted.example.test");
+    expect((await app.inject({ url: "/api/v1/auth/me", headers: { cookie: adminCookie } })).statusCode).toBe(200);
+  });
+
+  it("valida mínimo, dados de entrega e troco no servidor", async () => {
+    const payload = { slug: "est-a", mode: "RETIRADA", paymentMethod: "PIX", customerName: "Checkout", items: [{ productId, quantity: 1 }] };
+    await db.update(establishments).set({ minimumOrder: "50.00" }).where(eq(establishments.id, EST_A));
+    try {
+      expect((await app.inject({ method: "POST", url: "/api/v1/public/orders", payload })).statusCode).toBe(400);
+    } finally {
+      await db.update(establishments).set({ minimumOrder: "0.00" }).where(eq(establishments.id, EST_A));
+    }
+    for (const patch of [{ mode: "DELIVERY" }, { paymentMethod: "DINHEIRO", changeFor: 1 }]) {
+      expect((await app.inject({ method: "POST", url: "/api/v1/public/orders", payload: { ...payload, ...patch } })).statusCode).toBe(400);
+    }
+  });
+
+  it("valida seleção obrigatória, limite e duplicação de adicionais no servidor", async () => {
+    const [group] = await db.insert(optionGroups).values({ establishmentId: EST_A, name: "Ponto", required: true, minSelect: 1, maxSelect: 1, selection: "single" }).returning();
+    const opts = await db.insert(optionItems).values([
+      { establishmentId: EST_A, optionGroupId: group!.id, name: "Normal", price: "1.00" },
+      { establishmentId: EST_A, optionGroupId: group!.id, name: "Bem passado", price: "2.00" },
+    ]).returning();
+    await db.insert(productOptionGroups).values({ establishmentId: EST_A, productId, optionGroupId: group!.id });
+    for (const optionItemIds of [[], [opts[0]!.id, opts[0]!.id], opts.map(o => o.id)]) {
+      const r = await app.inject({ method: "POST", url: "/api/v1/public/orders", payload: {
+        slug: "est-a", mode: "RETIRADA", paymentMethod: "PIX", customerName: "Adicionais",
+        items: [{ productId, quantity: 1, optionItemIds }],
+      }});
+      expect(r.statusCode).toBe(400);
+    }
+    const valid = await app.inject({ method: "POST", url: "/api/v1/public/orders", payload: {
+      slug: "est-a", mode: "RETIRADA", paymentMethod: "PIX", customerName: "Adicionais",
+      items: [{ productId, quantity: 2, optionItemIds: [opts[0]!.id] }],
+    }});
+    expect(valid.statusCode).toBe(200);
+    expect(valid.json().total).toBe(42);
+  });
+
+  it("preflight permite PATCH ao navegador autorizado", async () => {
+    const r = await app.inject({ method: "OPTIONS", url: "/api/v1/orders/11111111-1111-4111-8111-111111111111/status", headers: {
+      origin: "http://localhost:5173", "access-control-request-method": "PATCH", "access-control-request-headers": "content-type",
+    }});
+    expect(r.statusCode).toBe(204);
+    expect(String(r.headers["access-control-allow-methods"])).toContain("PATCH");
+    expect(r.headers["access-control-allow-origin"]).toBe("http://localhost:5173");
+  });
+
 });

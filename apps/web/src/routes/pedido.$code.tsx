@@ -13,6 +13,7 @@ export const Route = createFileRoute("/pedido/$code")({
       { property: "og:title", content: `Acompanhe o pedido ${params.code}` },
       { property: "og:description", content: "Status do pedido atualizado em tempo real." },
       { name: "robots", content: "noindex" },
+      { name: "referrer", content: "no-referrer" },
     ],
   }),
   component: OrderTracking,
@@ -36,13 +37,17 @@ const MODE_LABEL: Record<string, string> = {
 function OrderTracking() {
   const { code: token } = Route.useParams();
 
-  const { data: order } = useQuery({
+  const { data: order, isPending, isError, refetch } = useQuery({
     queryKey: ["order-tracking", token],
     queryFn: () => getOrderTracking(token),
     refetchInterval: 15000,
   });
 
-  const displayCode = order?.code ?? "…";
+  if (isPending) return <main className="mx-auto max-w-2xl p-8" role="status">Carregando pedido…</main>;
+  if (isError) return <main className="mx-auto max-w-2xl p-8"><p role="alert">Não foi possível consultar o pedido.</p><Button onClick={() => void refetch()}>Tentar novamente</Button></main>;
+  if (!order) return <main className="mx-auto max-w-2xl p-8"><h1 className="text-2xl font-bold">Pedido não encontrado</h1><p>Confira o link privado recebido ao finalizar a compra.</p><Link to="/">Voltar ao início</Link></main>;
+  if (order.status === "CANCELADO") return <main className="mx-auto max-w-2xl p-8"><h1 className="text-2xl font-bold">Pedido cancelado</h1><p>Pedido #{order.code} · {order.establishment.name}</p><p>Entre em contato com o estabelecimento para mais informações.</p><Link to="/">Voltar ao início</Link></main>;
+  const displayCode = order.code;
 
   const isDelivery = order?.mode === "DELIVERY";
   const visibleSteps = isDelivery ? STEPS : STEPS.filter((s) => s.key !== "EM_ENTREGA");

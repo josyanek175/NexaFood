@@ -20,7 +20,6 @@ import {
   ShieldCheck,
   LogOut,
 } from "lucide-react";
-import { establishments } from "@/data/demo";
 import { Button } from "@/components/ui/button";
 import { RequireAuth } from "@/components/auth/RequireAuth";
 import { useAuth, type AppRole } from "@/hooks/use-auth";
@@ -84,7 +83,7 @@ function AdminLayout() {
     isPlatformAdmin,
     signOut,
   } = useAuth();
-  const establishment = currentMembership?.establishment ?? establishments[0]!;
+  const establishment = currentMembership?.establishment;
   const displayName = user?.fullName || user?.email || "Usuário";
   const initials = displayName
     .split(" ")
@@ -136,14 +135,14 @@ function AdminLayout() {
             </Link>
           );
         })}
-        <Link
+        {isPlatformAdmin && <Link
           to="/superadmin"
           onClick={() => setOpenMobile(false)}
           className="mt-3 flex items-center gap-3 rounded-xl border border-sidebar-border px-3 py-2.5 text-sm font-medium text-sidebar-foreground/75 transition hover:bg-sidebar-accent"
         >
           <ShieldCheck className="size-4 shrink-0" />
           Superadministrador
-        </Link>
+        </Link>}
       </nav>
       <div className="space-y-3 border-t border-sidebar-border p-4">
         {memberships.length > 1 && (
@@ -209,14 +208,14 @@ function AdminLayout() {
               <Menu className="size-5" />
             </Button>
             <div className="min-w-0">
-              <p className="truncate text-sm font-bold">{establishment.name}</p>
+              <p className="truncate text-sm font-bold">{establishment?.name ?? "Selecione um estabelecimento"}</p>
               <span
                 className={`inline-flex items-center gap-1.5 text-[11px] font-semibold ${
-                  establishment.is_open ? "text-success" : "text-destructive"
+                  establishment?.is_open ? "text-success" : "text-destructive"
                 }`}
               >
                 <span className="size-1.5 rounded-full bg-current" />
-                {establishment.is_open ? "Aberto" : "Fechado"}
+                {establishment?.is_open ? "Aberto" : "Fechado"}
               </span>
             </div>
           </div>
@@ -225,12 +224,12 @@ function AdminLayout() {
               <Bell className="size-5" />
               <span className="absolute right-1.5 top-1.5 size-2 rounded-full bg-primary" />
             </Button>
-            <Button asChild variant="secondary" className="rounded-full">
+            {establishment && <Button asChild variant="secondary" className="rounded-full">
               <Link to="/$slug" params={{ slug: establishment.slug }} search={{ mesa: undefined }}>
                 <ExternalLink className="mr-1.5 size-4" />
                 <span className="hidden sm:inline">Ver cardápio</span>
               </Link>
-            </Button>
+            </Button>}
           </div>
         </header>
 

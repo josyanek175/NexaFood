@@ -1,3 +1,4 @@
+import { ModulePending } from "@/components/admin/ModulePending";
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { Printer as PrinterIcon } from "lucide-react";
@@ -9,7 +10,7 @@ import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/admin/impressao")({
-  component: PrintingPage,
+  component: () => <ModulePending title="Configuração de impressoras" />,
 });
 
 const TRIGGERS: Record<string, string> = {
@@ -18,7 +19,7 @@ const TRIGGERS: Record<string, string> = {
   manual: "Somente manual",
 };
 
-function PrintingPage() {
+export function PrintingPage() {
   const est = establishments[0]!;
   const { data } = useQuery({ queryKey: ["printers", est.id], queryFn: () => api.listPrinters(est.id) });
 

@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { and, asc, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import type { AppRole } from "@nexafood/shared";
 import type { Database } from "../db/client.js";
 import {
@@ -9,6 +9,7 @@ import {
   orders,
   orderStatusEvents,
   productOptionGroups,
+  optionGroups,
   restaurantTables,
   customers,
 } from "../db/schema/index.js";
@@ -106,7 +107,22 @@ const KITCHEN_ITEM_STATUSES = ["NOVO", "PREPARANDO", "PRONTO"] as const;
 export type KitchenItemStatusValue = (typeof KITCHEN_ITEM_STATUSES)[number];
 
 export class OrderService {
-  constructor(private readonly db: Database) {}
+  constructor(
+    private readonly db: Database,
+    private readonly pendingEvents?: Parameters<typeof establishmentEvents.publish>[0][],
+  ) {}
+
+  private publish(event: Parameters<typeof establishmentEvents.publish>[0]) {
+    if (this.pendingEvents) this.pendingEvents.push(event);
+    else establishmentEvents.publish(event);
+  }
+
+  private async atomic<T>(run: (service: OrderService) => Promise<T>): Promise<T> {
+    const events: Parameters<typeof establishmentEvents.publish>[0][] = [];
+    const result = await this.db.transaction(async tx => run(new OrderService(tx as unknown as Database, events)));
+    for (const event of events) establishmentEvents.publish(event);
+    return result;
+  }
 
   /** Staff/cashier order — tenant always from session context. */
   async placeStaffOrder(
@@ -141,6 +157,10 @@ export class OrderService {
     orderId: string;
     tableId: string | null;
   }> {
+    return this.atomic(service => service.placeOrderInTransaction(input));
+  }
+
+  private async placeOrderInTransaction(input: PlaceOrderInput & { createdByUserId?: string | undefined }) {
     const name = input.customerName.trim();
     if (!name) throw badRequest("Informe o nome do cliente");
     if (!input.items.length) throw badRequest("Pedido sem itens");
@@ -164,6 +184,8 @@ export class OrderService {
       est = row;
     }
     if (!est) throw badRequest("Estabelecimento indisponível");
+    if (!input.createdByUserId && !est.isOpen) throw badRequest("Estabelecimento fechado para novos pedidos.");
+    if (input.items.length > 100) throw badRequest("Pedido excede o limite de itens.");
 
     let table: typeof restaurantTables.$inferSelect | null = null;
     if (input.tableId) {
@@ -182,6 +204,8 @@ export class OrderService {
       if (!row) throw badRequest("Mesa inválida para este estabelecimento.");
       table = row;
     }
+
+    if (table && !table.active) throw badRequest("Mesa inativa.");
 
     let customerId: string | null = null;
     if (input.customerId) {
@@ -271,14 +295,22 @@ export class OrderService {
         .returning();
       if (!item) throw badRequest("Não foi possível criar o item");
 
-      for (const optionItemId of line.optionItemIds ?? []) {
+      const selectedIds = line.optionItemIds ?? [];
+      if (new Set(selectedIds).size !== selectedIds.length) throw badRequest("Adicional repetido.");
+      const counts = new Map<string, number>();
+      const linkedGroups = await this.db.select({ group: optionGroups }).from(productOptionGroups)
+        .innerJoin(optionGroups, and(eq(optionGroups.id, productOptionGroups.optionGroupId), eq(optionGroups.establishmentId, est.id)))
+        .where(and(eq(productOptionGroups.productId, prod.id), eq(productOptionGroups.establishmentId, est.id)));
+
+      for (const optionItemId of selectedIds) {
         const { optionItem, optionGroup } = await assertOptionItemLinkedToProduct(
           this.db,
           est.id,
           prod.id,
           optionItemId,
         );
-        if (!optionItem.available) throw badRequest("Adicional indisponível");
+        if (!optionItem.available || !optionGroup.active) throw badRequest("Adicional indisponível");
+        counts.set(optionGroup.id, (counts.get(optionGroup.id) ?? 0) + 1);
 
         // Defense: link row must already match tenant; also verify denormalized equality.
         const [link] = await this.db
@@ -304,18 +336,36 @@ export class OrderService {
         unit += toNumber(optionItem.price);
       }
 
+      for (const { group } of linkedGroups) {
+        if (!group.active) continue;
+        const count = counts.get(group.id) ?? 0;
+        const min = Math.max(group.minSelect, group.required ? 1 : 0);
+        const max = group.selection === "single" ? 1 : group.maxSelect;
+        if (count < min || count > max) throw badRequest(`Confira as opções de ${group.name}: selecione entre ${min} e ${max}.`);
+      }
+
       await this.db
         .update(orderItems)
         .set({ unitPrice: money(unit) })
         .where(and(eq(orderItems.id, item.id), eq(orderItems.establishmentId, est.id)));
-      subtotal += unit * qty;
+      subtotal = Math.round((subtotal + Math.round(unit * 100) / 100 * qty) * 100) / 100;
+    }
+
+    if (!input.createdByUserId && subtotal < toNumber(est.minimumOrder)) {
+      throw badRequest("Pedido abaixo do valor mínimo do estabelecimento.");
+    }
+    if (!input.createdByUserId && input.mode === "DELIVERY" && (!input.address?.trim() || !input.customerPhone?.trim())) {
+      throw badRequest("Informe endereço e telefone para entrega.");
     }
 
     const serviceFee =
       input.mode === "LOCAL"
         ? Number(((subtotal * toNumber(est.serviceFeePercentage)) / 100).toFixed(2))
         : 0;
-    const total = subtotal + serviceFee;
+    const total = Math.round((subtotal + serviceFee) * 100) / 100;
+    if (input.paymentMethod === "DINHEIRO" && input.changeFor != null && (!Number.isFinite(input.changeFor) || input.changeFor < total)) {
+      throw badRequest("O valor para troco deve cobrir o total do pedido.");
+    }
 
     await this.db
       .update(orders)
@@ -331,22 +381,22 @@ export class OrderService {
         .update(restaurantTables)
         .set({
           status: "PREPARANDO",
-          openedAt: table.openedAt ?? new Date(),
-          currentTotal: money(toNumber(table.currentTotal) + total),
+          openedAt: sql`coalesce(${restaurantTables.openedAt}, now())`,
+          currentTotal: sql`${restaurantTables.currentTotal} + ${money(total)}`,
           updatedAt: new Date(),
         })
         .where(
           and(eq(restaurantTables.id, table.id), eq(restaurantTables.establishmentId, est.id)),
         );
 
-      establishmentEvents.publish({
+      this.publish({
         type: "table.updated",
         establishmentId: est.id,
         payload: { tableId: table.id, status: "PREPARANDO" },
       });
     }
 
-    establishmentEvents.publish({
+    this.publish({
       type: "order.created",
       establishmentId: est.id,
       payload: { orderId: order.id, code },
@@ -583,6 +633,10 @@ export class OrderService {
     kitchenStatus: KitchenItemStatusValue,
     allowedRoles: AppRole[],
   ) {
+    return this.atomic(service => service.updateKitchenInTransaction(ctx, itemId, kitchenStatus, allowedRoles));
+  }
+
+  private async updateKitchenInTransaction(ctx: EstablishmentContext, itemId: string, kitchenStatus: KitchenItemStatusValue, allowedRoles: AppRole[]) {
     if (!KITCHEN_ITEM_STATUSES.includes(kitchenStatus)) {
       throw badRequest("Status de cozinha inválido.");
     }
@@ -601,10 +655,10 @@ export class OrderService {
       .select()
       .from(orders)
       .where(and(eq(orders.id, item.orderId), eq(orders.establishmentId, ctx.establishmentId)))
-      .limit(1);
+      .limit(1).for("update");
     if (!order) throw notFound("Pedido não encontrado");
-    if (order.status === "CANCELADO") {
-      throw badRequest("Pedido cancelado não pode ser atualizado na cozinha.");
+    if (order.status === "CANCELADO" || order.status === "FINALIZADO") {
+      throw badRequest("Pedido encerrado não pode ser atualizado na cozinha.");
     }
 
     if (item.kitchenStatus !== kitchenStatus) {
@@ -635,7 +689,7 @@ export class OrderService {
     );
 
     let nextOrderStatus: OrderStatusValue | null = null;
-    if (allReady && order.status !== "FINALIZADO" && order.status !== "EM_ENTREGA") {
+    if (allReady && order.status !== "EM_ENTREGA") {
       nextOrderStatus = "PRONTO";
     } else if (
       anyStarted &&
@@ -662,7 +716,7 @@ export class OrderService {
 
     const effectiveOrderStatus = nextOrderStatus ?? order.status;
 
-    establishmentEvents.publish({
+    this.publish({
       type: "order.updated",
       establishmentId: ctx.establishmentId,
       payload: {
@@ -689,6 +743,10 @@ export class OrderService {
     status: OrderStatusValue,
     allowedRoles: AppRole[],
   ) {
+    return this.atomic(service => service.updateStatusInTransaction(ctx, orderId, status, allowedRoles));
+  }
+
+  private async updateStatusInTransaction(ctx: EstablishmentContext, orderId: string, status: OrderStatusValue, allowedRoles: AppRole[]) {
     if (!ORDER_STATUSES.includes(status)) throw badRequest("Status inválido");
     if (!allowedRoles.includes(ctx.role)) {
       throw forbidden("Perfil sem permissão para esta operação.");
@@ -698,11 +756,15 @@ export class OrderService {
       .select()
       .from(orders)
       .where(and(eq(orders.id, orderId), eq(orders.establishmentId, ctx.establishmentId)))
-      .limit(1);
+      .limit(1).for("update");
     if (!order) throw notFound("Pedido não encontrado");
 
     if (order.status === status) {
       return { ok: true as const, status, tableId: order.tableId };
+    }
+
+    if (order.status === "FINALIZADO" || order.status === "CANCELADO") {
+      throw badRequest("Pedido encerrado não pode mudar de status.");
     }
 
     await this.db
@@ -718,7 +780,7 @@ export class OrderService {
       changedByName: ctx.auth.user.fullName || ctx.auth.user.email,
     });
 
-    establishmentEvents.publish({
+    this.publish({
       type: "order.updated",
       establishmentId: ctx.establishmentId,
       payload: { orderId, status },

@@ -1,3 +1,4 @@
+import { ModulePending } from "@/components/admin/ModulePending";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, Building2, CreditCard, Users } from "lucide-react";
@@ -25,7 +26,7 @@ export const Route = createFileRoute("/superadmin")({
 function SuperAdminRoute() {
   return (
     <RequireAuth platformAdmin>
-      <SuperAdmin />
+      <ModulePending title="Administração da plataforma" />
     </RequireAuth>
   );
 }
@@ -36,7 +37,7 @@ const PLAN_LABEL: Record<string, string> = {
   enterprise: "Avançado",
 };
 
-function SuperAdmin() {
+export function SuperAdminPreview() {
   const { data } = useQuery({ queryKey: ["establishments"], queryFn: () => api.listEstablishments() });
   const list = data ?? [];
   const mrr = list.length * 189;
